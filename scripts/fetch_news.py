@@ -1,42 +1,20 @@
 #!/usr/bin/env python3
 """
-Fetch recent APA News Releases (Psychiatric News) -> structured JSON.
+Fetch APA News Releases (Psychiatric News) -> structured JSON.
 
 Source: https://www.psychiatry.org/News-room/News-Releases
-(The official RSS was discontinued and psychnews.* is behind Cloudflare,
-so we parse this stable, JS-free listing page.)
+(official RSS discontinued; psychnews.* behind Cloudflare; this is stable + JS-free)
 
-Default: releases from the LAST 7 DAYS (rolling, inclusive of today).
+Usage:
   fetch_news.py        -> last 7 days
   fetch_news.py 14     -> last 14 days (arg = N days, 1-60)
 
 Output JSON: { window, today, count, latest_available, items[] }
+Each item: date / title / url / summary / body_md / paragraphs / authors / location / extra_links
+(8 字段详解:命中率 / regex / 盲区见 references/field-extraction-patterns.md;
+ html2text 转换 body_md 用,需 pip install -r requirements.txt)
 
-Each item has these fields (all best-effort; failures yield empty defaults,
-never raise):
-  - date        : str              发布日期(原文,例 "May 18, 2026")
-  - title       : str              标题(原文,英文)
-  - url         : str              详情页 URL(psychiatry.org)
-  - summary     : str              1 段简短摘要(meta description 优先,fallback 段落 1)
-                                   → 给消息模板(中文摘要翻译后)用
-  - body_md     : str              **完整正文** Markdown(html2text 转换)
-                                   块引用/列表/小标题/链接/强调全保
-                                   → 给飞书云文档存档用
-  - paragraphs  : list[str]        从 body_md 切出的实质段落(>=40 字符,过滤导航/版权)
-  - authors     : list[str]        作者列表(从"study authors include/included/are"
-                                   或 dateline 兜底抓"FirstName LastName, M.D.")
-  - location    : str              发布城市/机构地(从首段 dateline 抓 "San Francisco")
-  - extra_links : list[dict]       次级原文链接(非 psychiatry.org 主页),按类型分组:
-                                   [{"type": "journal"|"youtube"|"spanish", "url": ..., "label": ...}]
-                                   - journal: ajp.psychiatryonline.org / ps.psychiatryonline.org
-                                   - youtube: youtu.be / youtube.com 视频摘要
-                                   - spanish: psychiatry.org 西语版镜像(Nueva-/TDAH/Español)
-
-Maintenance: if APA redesigns the site and results drop to 0, update the
-class selectors below (c-article-item / c-meta__date / article body).
-
-Dependency: html2text (pip install html2text) — used in fetch_full() to
-            convert article HTML to Markdown for the body_md field.
+Maintenance: APA 改版导致 0 命中持续 3 天 → 更新下方 c-article-item / c-meta__date / <article> 选择器。
 """
 import sys
 import re
@@ -105,17 +83,8 @@ def parse_listing(htm):
 
 
 def fetch_full(item):
-    """Attach full article body + structured fields.
-
-    Fields added to item (all best-effort, failure = empty/default, never raises):
-      - summary    : str  (kept for back-compat; 1 段 meta description or first paragraphs)
-      - body_md    : str  (整段 Markdown,html2text 转换,块引用/列表/小标题/链接/强调全保)
-      - paragraphs : list[str]  (从 body_md 按空行切,只留 >=40 字符的实质段落)
-      - authors    : list[str]  (从正文 "The study authors include ..." 解析;空=未解析到)
-      - location   : str        (首段 dateline, "San Francisco — ..." → "San Francisco";空=未抓到)
-      - extra_links: list[dict] (次级原文链接,非 psychiatry.org 主页:
-                                  type=journal/youtube/spanish, url, label)
-    """
+    """Attach 5 fields: summary / body_md / paragraphs / authors / location / extra_links.
+    All best-effort, never raises (failure = empty defaults, _error attached)."""
     try:
         h = get(item["url"])
     except Exception as e:
